@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.appcompat.widget.LinearLayoutCompat xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:orientation="vertical"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity">
+
+    <ImageView
+        android:layout_width="match_parent"
+        android:layout_height="360dp"
+        android:src="@drawable/fitness"
+        >
+    </ImageView>
+
+    <TextView
+        android:id="@+id/btnsignuplogo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="SIGNUP"
+        android:padding="10dp"
+        android:layout_margin="40dp"
+        android:gravity="center"
+        android:textColor="@color/white"
+        android:background="@drawable/button_design">
+    </TextView>
+    <TextView
+        android:id="@+id/btnloginlogo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="LOGIN"
+        android:padding="10dp"
+        android:layout_marginRight="40dp"
+        android:layout_marginLeft="40dp"
+        android:gravity="center"
+        android:background="@drawable/button_design"
+        android:textColor="@color/white">
+    </TextView>
+
+
+</androidx.appcompat.widget.LinearLayoutCompat>
