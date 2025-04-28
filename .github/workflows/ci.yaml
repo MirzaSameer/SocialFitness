@@ -3,7 +3,7 @@ name: Semantic Release with Notes
 on:
  push:
   branches:
-   - staging
+   - staging 
    - main
 
 permissions:
