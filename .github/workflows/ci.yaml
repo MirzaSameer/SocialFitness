@@ -1,0 +1,188 @@
+name: Semantic Release with Notes
+
+on:
+ push:
+  branches:
+   - staging
+   - main
+
+permissions:
+  contents: write
+
+jobs:
+  determine-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version_type: ${{ steps.commit-analysis.outputs.version_type }}
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          
+      - name: Analyze commit messages
+        id: commit-analysis
+        run: |
+          # Check all commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
+          
+          if [ "$LAST_TAG" = "none" ]; then
+            # No previous tags, this is the first release
+            echo "version_type=minor" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Check commit messages for semantic version keywords
+          COMMITS=$(git log $LAST_TAG..HEAD --pretty=format:"%s")
+          
+          # Check for breaking changes (MAJOR)
+          if echo "$COMMITS" | grep -q -i "BREAKING CHANGE\|BREAKING-CHANGE\|breaking change"; then
+            echo "version_type=major" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Check for feat: (MINOR)
+          if echo "$COMMITS" | grep -q -i "^feat\|^feature\|^feat:"; then
+            echo "version_type=minor" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Default to patch
+          echo "version_type=patch" >> $GITHUB_OUTPUT
+
+  create-release:
+    needs: determine-version
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          
+      - name: Setup Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+      - name: Get current branch
+        id: branch
+        run: echo "name=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_OUTPUT
+        
+      - name: Create tag and release for staging
+        if: ${{ steps.branch.outputs.name == 'staging' }}
+        run: |
+          # Get the latest version
+          LATEST_TAG=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" | sort -V | tail -n 1 || echo "v0.0.0")
+          
+          # Remove 'v' prefix for calculation
+          VERSION_NUM=${LATEST_TAG#v}
+          
+          # Split version into components
+          MAJOR=$(echo $VERSION_NUM | cut -d. -f1)
+          MINOR=$(echo $VERSION_NUM | cut -d. -f2)
+          PATCH=$(echo $VERSION_NUM | cut -d. -f3)
+          
+          # Bump version based on commit analysis
+          case "${{ needs.determine-version.outputs.version_type }}" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="v$MAJOR.$MINOR.$PATCH"
+          
+          # Create release candidate tag
+          RC_COUNT=$(git tag -l "$NEW_VERSION-rc.*" | wc -l)
+          RC_COUNT=$((RC_COUNT + 1))
+          TAG_VERSION="$NEW_VERSION-rc.$RC_COUNT"
+          
+          git tag -a "$TAG_VERSION" -m "Release candidate $RC_COUNT for $NEW_VERSION"
+          echo "Created release candidate tag: $TAG_VERSION"
+          git push --tags
+          
+          # Create GitHub Release using REST API
+          curl \
+            -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/releases \
+            -d '{
+              "tag_name": "'"$TAG_VERSION"'",
+              "name": "Release '"$TAG_VERSION"'",
+              "body": "Release candidate for testing",
+              "draft": false,
+              "prerelease": true
+            }'
+            
+      - name: Create tag and release for production
+        if: ${{ steps.branch.outputs.name == 'production' }}
+        run: |
+          # Get the latest version
+          LATEST_TAG=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" | sort -V | tail -n 1 || echo "v0.0.0")
+          
+          # Remove 'v' prefix for calculation
+          VERSION_NUM=${LATEST_TAG#v}
+          
+          # Split version into components
+          MAJOR=$(echo $VERSION_NUM | cut -d. -f1)
+          MINOR=$(echo $VERSION_NUM | cut -d. -f2)
+          PATCH=$(echo $VERSION_NUM | cut -d. -f3)
+          
+          # Bump version based on commit analysis
+          case "${{ needs.determine-version.outputs.version_type }}" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="v$MAJOR.$MINOR.$PATCH"
+          
+          # Create final version tag
+          git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+          echo "Created release tag: $NEW_VERSION"
+          git push --tags
+          
+          # Generate simple release notes
+          PREV_PROD_TAG=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" | grep -v "rc" | sort -V | tail -n 2 | head -n 1 || echo "")
+          
+          if [ -z "$PREV_PROD_TAG" ]; then
+            # If this is the first release
+            COMMITS=$(git log --pretty=format:"- %s (%h)" | head -20)
+          else
+            # Get changes since last production release
+            COMMITS=$(git log $PREV_PROD_TAG..HEAD --pretty=format:"- %s (%h)")
+          fi
+          
+          # Use the GitHub API to create a release with notes
+          curl \
+            -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/releases \
+            -d '{
+              "tag_name": "'"$NEW_VERSION"'",
+              "name": "Release '"$NEW_VERSION"'",
+              "body": "### Changes in this release\n\n'"${COMMITS//$'\n'/\\n}"'",
+              "draft": false,
+              "prerelease": false
+            }'
